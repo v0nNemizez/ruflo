@@ -267,40 +267,86 @@ function getSecurityStatus() {
   };
 }
 
-// Swarm status (pure file reads, NO ps aux)
+// Swarm status — reads from live ruflo CLI, falls back to cached state files
 function getSwarmStatus() {
-  // Check swarm state file — only trust if recently updated (within 5 min)
-  const staleThresholdMs = 5 * 60 * 1000;
-  const now = Date.now();
+  let activeAgents = 0;
+  let coordinationActive = false;
 
-  const swarmStatePath = path.join(CWD, '.claude-flow', 'swarm', 'swarm-state.json');
-  const swarmState = readJSON(swarmStatePath);
-  if (swarmState) {
-    const updatedAt = swarmState.updatedAt || swarmState.startedAt;
-    const age = updatedAt ? now - new Date(updatedAt).getTime() : Infinity;
-    if (age < staleThresholdMs) {
-      return {
-        activeAgents: swarmState.agents?.length || swarmState.agentCount || 0,
-        maxAgents: swarmState.maxAgents || CONFIG.maxAgents,
-        coordinationActive: true,
-      };
+  const STATE_PATH = path.join(CWD, '.claude-flow', 'swarm', 'swarm-state.json');
+  const STALE_MS = 5 * 1000;
+
+  // Helper: run a shell command and return stdout, or null on failure
+  function safeRun(cmd) {
+    try {
+      return execSync(cmd, { encoding: 'utf-8', timeout: 4000 });
+    } catch { return null; }
+  }
+
+  // Check state file age — if fresh enough, read from cache
+  try {
+    const stat = fs.statSync(STATE_PATH);
+    if (Date.now() - stat.mtimeMs < STALE_MS) {
+      const cached = JSON.parse(fs.readFileSync(STATE_PATH, 'utf-8'));
+      activeAgents = cached.agentCount || 0;
+      coordinationActive = activeAgents > 0;
+      return { activeAgents, maxAgents: cached.maxAgents || CONFIG.maxAgents, coordinationActive };
+    }
+  } catch { /* no cache yet */ }
+
+  // Fetch live status from ruflo CLI
+  let hiveData = null;
+  let swarmData = null;
+  const hiveRaw  = safeRun('ruflo hive-mind status --format json 2>/dev/null');
+  const swarmRaw = safeRun('ruflo swarm status --format json 2>/dev/null');
+  try { hiveData  = JSON.parse(hiveRaw);  } catch { /* not JSON */ }
+  try { swarmData = JSON.parse(swarmRaw); } catch { /* not JSON */ }
+
+  if (hiveData || swarmData) {
+    const hiveWorkers  = (hiveData  && Array.isArray(hiveData.workers))  ? hiveData.workers  : [];
+    const swarmAgents  = (swarmData && Array.isArray(swarmData.agents))  ? swarmData.agents  : [];
+    activeAgents = hiveWorkers.length + swarmAgents.length;
+    coordinationActive = activeAgents > 0;
+
+    const state = {
+      updatedAt:   new Date().toISOString(),
+      source:      'live-ruflo',
+      agentCount:  activeAgents,
+      maxAgents:   (swarmData && swarmData.maxAgents) || (hiveData && hiveData.config && hiveData.config.maxAgents) || CONFIG.maxAgents,
+      agents:      [...hiveWorkers, ...swarmAgents],
+      hiveStatus:  hiveData  ? { hiveId: hiveData.hiveId, status: hiveData.status, topology: hiveData.topology, workerCount: hiveData.workerCount || hiveWorkers.length } : { status: 'shutdown' },
+      swarmStatus: swarmData ? { swarmId: swarmData.swarmId || swarmData.id, status: swarmData.status, topology: swarmData.topology } : null,
+    };
+    try {
+      const dir = path.join(CWD, '.claude-flow', 'swarm');
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+    } catch { /* ignore write errors */ }
+  } else {
+    // Both CLI calls failed — write shutdown state so cache stays fresh
+    const shutdownState = {
+      updatedAt: new Date().toISOString(), source: 'live-ruflo',
+      agentCount: 0, maxAgents: CONFIG.maxAgents, agents: [],
+      hiveStatus: { status: 'shutdown' }, swarmStatus: null,
+    };
+    try {
+      const dir = path.join(CWD, '.claude-flow', 'swarm');
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(STATE_PATH, JSON.stringify(shutdownState, null, 2));
+    } catch { /* ignore */ }
+
+    // Fallback: check swarm-activity.json
+    const activityData = readJSON(path.join(CWD, '.claude-flow', 'metrics', 'swarm-activity.json'));
+    if (activityData?.swarm) {
+      activeAgents = activityData.swarm.agent_count || 0;
+      coordinationActive = activityData.swarm.coordination_active || activityData.swarm.active || false;
     }
   }
 
-  const activityData = readJSON(path.join(CWD, '.claude-flow', 'metrics', 'swarm-activity.json'));
-  if (activityData?.swarm) {
-    const updatedAt = activityData.timestamp || activityData.swarm.timestamp;
-    const age = updatedAt ? now - new Date(updatedAt).getTime() : Infinity;
-    if (age < staleThresholdMs) {
-      return {
-        activeAgents: activityData.swarm.agent_count || 0,
-        maxAgents: CONFIG.maxAgents,
-        coordinationActive: activityData.swarm.coordination_active || activityData.swarm.active || false,
-      };
-    }
-  }
-
-  return { activeAgents: 0, maxAgents: CONFIG.maxAgents, coordinationActive: false };
+  return {
+    activeAgents,
+    maxAgents: CONFIG.maxAgents,
+    coordinationActive,
+  };
 }
 
 // System metrics (uses process.memoryUsage() — no shell spawn)
