@@ -17,7 +17,9 @@
 
 import { EventEmitter } from 'node:events';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
+import initSqlJs from 'sql.js';
+// sql.js exports Database as a class from the factory result, not as a named export
+type SqlJsDatabase = InstanceType<Awaited<ReturnType<typeof initSqlJs>>['Database']>;
 import { DomainEvent, AllDomainEvents } from './domain-events.js';
 
 // =============================================================================

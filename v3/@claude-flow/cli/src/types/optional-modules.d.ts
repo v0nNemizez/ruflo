@@ -376,3 +376,63 @@ declare module '@xenova/transformers' {
   export const pipeline: any;
   export const env: any;
 }
+
+declare module '@noble/ed25519' {
+  export function getPublicKey(privateKey: Uint8Array): Promise<Uint8Array>;
+  export function sign(message: Uint8Array, privateKey: Uint8Array): Promise<Uint8Array>;
+  export function verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): Promise<boolean>;
+  export function verifyAsync(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): Promise<boolean>;
+  export const utils: any;
+}
+
+declare module '@ruvector/learning-wasm' {
+  const learning: any;
+  export default learning;
+  export function init(): Promise<void>;
+  export function initSync(opts: { module: BufferSource }): void;
+  export class LearningEngine {
+    constructor(...args: any[]);
+    train(...args: any[]): any;
+    predict(...args: any[]): any;
+  }
+  export class WasmMicroLoRA {
+    constructor(...args: any[]);
+    apply(input: Float32Array): Float32Array;
+    adapt(...args: any[]): void;
+    stats(): any;
+    reset(): void;
+  }
+  export class WasmScopedLoRA {
+    constructor(...args: any[]);
+    apply(input: Float32Array): Float32Array;
+    adapt(...args: any[]): void;
+    stats(): any;
+  }
+  export class WasmTrajectoryBuffer {
+    constructor(...args: any[]);
+    add(...args: any[]): void;
+    sample(...args: any[]): any[];
+    stats(): any;
+    clear(): void;
+  }
+}
+
+declare module '@ruvector/ruvllm' {
+  const ruvllm: any;
+  export default ruvllm;
+}
+
+declare module 'agentic-flow/embeddings' {
+  export function createEmbedder(...args: any[]): any;
+  export function embed(text: string): Promise<number[]>;
+  export function embedBatch(texts: string[]): Promise<number[][]>;
+  export function getNeuralSubstrate(...args: any[]): any;
+  export function listAvailableModels(...args: any[]): any;
+  export function downloadModel(...args: any[]): Promise<any>;
+  export class ONNXEmbedder {
+    constructor(...args: any[]);
+    embed(text: string): Promise<number[]>;
+    embedBatch(texts: string[]): Promise<number[][]>;
+    isReady(): boolean;
+  }
+}
